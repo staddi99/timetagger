@@ -2457,6 +2457,14 @@ class RecordsWidget(Widget):
         fullwidth = x2 - x1  # * (sumcount_full / (t2 - t1)) # ** 0.5
         fullheight = (y2 - y1) * (sumcount_full / (t2 - t1))  # ** 0.5
 
+        # Darken the colors for free days.
+        if dt.get_weekday_shortname(t) == "Sat" and window.simplesettings.get("workdays") == 2 and stat_period == "1D":
+            ctx.fillStyle = COLORS.button_text_disabled
+            ctx.fillRect(x1, y1, fullwidth, y2 - y1)
+        elif dt.get_weekday_shortname(t) == "Sun" and window.simplesettings.get("workdays") >= 1 and stat_period == "1D":
+            ctx.fillStyle = COLORS.button_text_disabled
+            ctx.fillRect(x1, y1, fullwidth, y2 - y1)
+
         # Show amount of time spend on each tag
         x = x1
         for i in range(len(stats_list)):
@@ -3298,7 +3306,8 @@ class AnalyticsWidget(Widget):
             ctx.fillStyle = COLORS.prim2_clr
             if best_target:
                 done_this_period = total_time
-                target_this_period = 3600 * best_target.hours * best_target.factor
+                freeDays = dt.get_free_days_in_range(t1, t2, window.simplesettings.get("workdays"))
+                target_this_period = 3600 * best_target.hours * (best_target.factor - freeDays)
                 perc = 100 * done_this_period / target_this_period
                 prefix = "" if 0.93 < best_target.factor < 1.034 else "~ "
                 ctx.fillText(
