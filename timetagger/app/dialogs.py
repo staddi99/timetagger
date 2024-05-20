@@ -570,6 +570,8 @@ class TimeSelectionDialog(BaseDialog):
             presets.children[0].innerHTML += " <span class='keyhint'>d</span>"
             presets.children[1].innerHTML += " <span class='keyhint'>w</span>"
             presets.children[2].innerHTML += " <span class='keyhint'>m</span>"
+            presets.children[3].innerHTML += " <span class='keyhint'>q</span>"
+            presets.children[4].innerHTML += " <span class='keyhint'>y</span>"
 
         for i in range(presets.children.length):
             but = presets.children[i]
@@ -1506,6 +1508,15 @@ class RecordDialog(BaseDialog):
         self._record = None
         self._no_user_edit_yet = True
 
+        # Enable stopping a record via the notification
+        if window.navigator.serviceWorker:
+            try:
+                window.navigator.serviceWorker.addEventListener(
+                    "message", self.on_notificationclick
+                )
+            except Exception:
+                pass
+
     def open(self, mode, record, callback=None):
         """Show/open the dialog for the given record. On submit, the
         record will be pushed to the store and callback (if given) will
@@ -1825,6 +1836,9 @@ class RecordDialog(BaseDialog):
         # Apply
         window.store.records.put(self._record)
         super().submit(self._record)
+        # Notify
+        if self._lmode == "start":
+            self.send_notification(self._record)
         # Start pomo?
         if window.simplesettings.get("pomodoro_enabled"):
             if self._lmode == "start":
@@ -1853,9 +1867,42 @@ class RecordDialog(BaseDialog):
         if not (t1 < now < t2):
             t1, t2 = self._canvas.range.get_today_range()
             self._canvas.range.animate_range(t1, t2)
+        # Notify
+        self.send_notification(record)
         # Start pomo?
         if window.simplesettings.get("pomodoro_enabled"):
             self._canvas.pomodoro_dialog.start_work()
+
+    def send_notification(self, record):
+        if not window.simplesettings.get("notifications"):
+            return
+        if window.Notification and Notification.permission != "granted":
+            return
+
+        title = "TimeTagger is tracking time"
+        actions = [
+            {"action": "stop", "title": "Stop"},
+        ]
+        options = {
+            "icon": "timetagger192_sf.png",
+            "body": record.ds or "",
+            "requireInteraction": True,
+            "tag": "timetagger-running",  # replace previous notifications
+        }
+        # If we show the notification via the service worker, we
+        # can show actions, making the flow easier for users.
+        if window.pwa and window.pwa.sw_reg:
+            options.actions = actions
+            window.pwa.sw_reg.showNotification(title, options)
+        else:
+            Notification(title, options)
+
+    def on_notificationclick(self, message_event):
+        event = message_event.data
+        if event.type != "notificationclick":
+            return
+        if event.action == "stop":
+            self._stop_all_running_records()
 
 
 class TargetHelper:
@@ -3765,6 +3812,7 @@ class SettingsDialog(BaseDialog):
             "D": "Select today",
             "W": "Select this week",
             "M": "Select this month",
+            "Q": "Select this quarter",
             "Y": "Select this year",
             "↑/PageUp": "Step back in time",
             "↓/PageDown": "Step forward in time",
@@ -3774,6 +3822,7 @@ class SettingsDialog(BaseDialog):
             "S": "Start the timer or add an earlier record",
             "Shift+S": "Resume the current/previous record",
             "X": "Stop the timer",
+            "F": "Open search dialog",
             "T": "Select time range",
             "R": "Open report dialog",
             "I": "Open the guide",
@@ -3859,6 +3908,10 @@ class SettingsDialog(BaseDialog):
                     <option value='full'>Full width</option>
                 </select>
             </div>
+            <h2><i class='fas'>\uf0e0</i>&nbsp;&nbsp;Notification</h2>
+            <label>
+                <input type='checkbox' checked='false'></input>
+                Show notification when starting a record.</label>
             <h2><i class='fas'>\uf2f2</i>&nbsp;&nbsp;Pomodoro</h2>
             <label>
                 <input type='checkbox' checked='false'></input>
@@ -3888,6 +3941,8 @@ class SettingsDialog(BaseDialog):
             _,  # Section: per device
             _,  # Appearance header
             self._appearance_form,
+            _,  # Notification header
+            self._notification_label,
             _,  # Pomodoro header
             self._pomodoro_label,
             _,  # hr
@@ -3956,6 +4011,12 @@ class SettingsDialog(BaseDialog):
         self._width_mode_select.value = width_mode
         self._width_mode_select.onchange = self._on_width_mode_change
 
+        # Notifications
+        notifications_enabled = window.simplesettings.get("notifications")
+        self._notification_check = self._notification_label.children[0]
+        self._notification_check.checked = notifications_enabled
+        self._notification_check.onchange = self._on_notifications_check
+
         # Pomodoro
         pomo_enabled = window.simplesettings.get("pomodoro_enabled")
         self._pomodoro_check = self._pomodoro_label.children[0]
@@ -4005,6 +4066,14 @@ class SettingsDialog(BaseDialog):
         if window.front:
             window.front.set_width_mode(width_mode)
             self._canvas._on_js_resize_event()  # private method, but ah well
+
+    def _on_notifications_check(self):
+        notifications_enabled = bool(self._notification_check.checked)
+        window.simplesettings.set("notifications", notifications_enabled)
+        # Ask the user
+        if notifications_enabled:
+            if window.Notification and window.Notification.permission == "default":
+                Notification.requestPermission()
 
     def _on_pomodoro_check(self):
         pomo_enabled = bool(self._pomodoro_check.checked)
